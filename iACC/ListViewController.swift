@@ -130,17 +130,13 @@ class ListViewController: UITableViewController {
 							self?.tableView.reloadData()
 							
 						case let .failure(error):
-							let alert = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
-							alert.addAction(UIAlertAction(title: "Ok", style: .default))
-							self?.presenterVC.present(alert, animated: true)
+                            self?.show(error: error)
 						}
 						self?.refreshControl?.endRefreshing()
 					}
 				}
 			} else {
-				let alert = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
-				alert.addAction(UIAlertAction(title: "Ok", style: .default))
-				self.presenterVC.present(alert, animated: true)
+                self.show(error: error)
 				self.refreshControl?.endRefreshing()
 			}
 		}
@@ -178,36 +174,43 @@ class ListViewController: UITableViewController {
     func select(friend: Friend) {
         let vc = FriendDetailsViewController()
         vc.friend = friend
-        navigationController?.pushViewController(vc, animated: true)
+       show(vc, sender: self)
     }
     
     func select(card: Card) {
         let vc = CardDetailsViewController()
         vc.card = card
-        navigationController?.pushViewController(vc, animated: true)
+        show(vc, sender: self)
     }
     
     func select(transfer: Transfer) {
         let vc = TransferDetailsViewController()
         vc.transfer = transfer
-        navigationController?.pushViewController(vc, animated: true)
+        show(vc, sender: self)
     }
 	
 	@objc func addCard() {
-		navigationController?.pushViewController(AddCardViewController(), animated: true)
+        show(AddCardViewController(), sender: self)
 	}
 	
 	@objc func addFriend() {
-		navigationController?.pushViewController(AddFriendViewController(), animated: true)
+        show(AddFriendViewController(), sender: self)
 	}
 	
 	@objc func sendMoney() {
-		navigationController?.pushViewController(SendMoneyViewController(), animated: true)
+        show(SendMoneyViewController(), sender: self)
 	}
 	
 	@objc func requestMoney() {
-		navigationController?.pushViewController(RequestMoneyViewController(), animated: true)
+        show(RequestMoneyViewController(), sender: self)
 	}
+    
+    //Helper Method To Show Alert
+    func show(error: Error) {
+        let alert = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Ok", style: .default))
+        self.showDetailViewController(alert, sender: self)
+    }
 }
 
 struct ItemViewModel {
