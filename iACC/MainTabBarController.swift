@@ -6,8 +6,11 @@ import UIKit
 
 class MainTabBarController: UITabBarController {
 	
-	convenience init() {
+    private var friendsCache: FriendsCache!
+    
+	convenience init(friendsCache: FriendsCache) {
 		self.init(nibName: nil, bundle: nil)
+        self.friendsCache = friendsCache
 		self.setupViewController()
 	}
 
@@ -54,6 +57,16 @@ class MainTabBarController: UITabBarController {
 	private func makeFriendsList() -> ListViewController {
 		let vc = ListViewController()
 		vc.fromFriendsScreen = true
+        vc.shouldRetry = true
+        vc.maxRetryCount = 2
+        vc.title = "Friends"
+        vc.navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: vc, action: #selector(addFriend))
+        let isPremium = User.shared?.isPremium == true
+        vc.service = FriendsAPIItemsServiceAdapter(
+            api: FriendsAPI.shared,
+            cache: isPremium ? friendsCache : NullFriendsCache()) { [weak vc] friend in
+                    vc?.select(friend: friend)
+            }
 		return vc
 	}
 	
@@ -75,4 +88,32 @@ class MainTabBarController: UITabBarController {
 		return vc
 	}
 	
+}
+
+struct FriendsAPIItemsServiceAdapter: ItemsService {
+    let api: FriendsAPI
+    let cache: FriendsCache
+    let select: (Friend) -> Void
+    
+    func loadItems(completion: @escaping (Result<[ItemViewModel], Error>) -> Void) {
+        api.loadFriends { result in
+            DispatchQueue.mainAsyncIfNeeded {
+                completion(result.map { friends in
+                    cache.save(friends)
+                    
+                    return friends.map { friend in
+                        ItemViewModel(friend: friend) {
+                            select(friend)
+                        }
+                    }
+                })
+            }
+        }
+    }
+}
+
+//Null object pattern
+//an instance sharing a same interface but does nothing!
+class NullFriendsCache: FriendsCache {
+    override func loadFriends(completion: @escaping (Result<[Friend], Error>) -> Void) {}
 }
