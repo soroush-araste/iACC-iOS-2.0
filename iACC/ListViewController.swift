@@ -65,62 +65,68 @@ class ListViewController: UITableViewController {
 		}
 	}
 	
-	@objc private func refresh() {
-		refreshControl?.beginRefreshing()
-		if fromFriendsScreen {
-			FriendsAPI.shared.loadFriends { [weak self] result in
-				DispatchQueue.mainAsyncIfNeeded {
-					self?.handleAPIResult(result)
-				}
-			}
-		} else if fromCardsScreen {
-			CardAPI.shared.loadCards { [weak self] result in
-				DispatchQueue.mainAsyncIfNeeded {
-					self?.handleAPIResult(result)
-				}
-			}
-		} else if fromSentTransfersScreen || fromReceivedTransfersScreen {
-			TransfersAPI.shared.loadTransfers { [weak self] result in
-				DispatchQueue.mainAsyncIfNeeded {
-					self?.handleAPIResult(result)
-				}
-			}
-		} else {
-			fatalError("unknown context")
-		}
-	}
+    @objc private func refresh() {
+        refreshControl?.beginRefreshing()
+        if fromFriendsScreen {
+            FriendsAPI.shared.loadFriends { [weak self] result in
+                DispatchQueue.mainAsyncIfNeeded {
+                    self?.handleAPIResult(result.map { friends in
+                        if User.shared?.isPremium == true {
+                            (UIApplication.shared.connectedScenes.first?.delegate as! SceneDelegate).cache.save(friends)
+                        }
+                        return friends.map { friend in
+                            ItemViewModel(friend: friend) { [weak self] in
+                                self?.select(friend: friend)
+                            }
+                        }
+                    })
+                }
+            }
+        } else if fromCardsScreen {
+            CardAPI.shared.loadCards { [weak self] result in
+                DispatchQueue.mainAsyncIfNeeded {
+                    self?.handleAPIResult(result.map { cards in
+                        cards.map { card in
+                            ItemViewModel(card: card) { [weak self] in
+                                self?.select(card: card)
+                            }
+                        }
+                    })
+                }
+            }
+        } else if fromSentTransfersScreen || fromReceivedTransfersScreen {
+            TransfersAPI.shared.loadTransfers { [weak self, longDateStyle, fromSentTransfersScreen] result in
+                DispatchQueue.mainAsyncIfNeeded {
+                    self?.handleAPIResult(result.map { transfers in
+                        var filteredItems = transfers
+                        if fromSentTransfersScreen {
+                            filteredItems = filteredItems.filter(\.isSender)
+                        } else {
+                            filteredItems = filteredItems.filter { !$0.isSender }
+                        }
+                        return filteredItems
+                            .filter { fromSentTransfersScreen ? $0.isSender : !$0.isSender}
+                            .map { item in
+                                ItemViewModel(
+                                    transfer: item,
+                                    longDateStyle: longDateStyle) {
+                                        self?.select(transfer: item)
+                                    }
+                            }
+                        
+                    })
+                }
+            }
+        } else {
+            fatalError("unknown context")
+        }
+    }
 	
-	private func handleAPIResult<T>(_ result: Result<[T], Error>) {
+	private func handleAPIResult(_ result: Result<[ItemViewModel], Error>) {
 		switch result {
 		case let .success(items):
-			if fromFriendsScreen && User.shared?.isPremium == true {
-				(UIApplication.shared.connectedScenes.first?.delegate as! SceneDelegate).cache.save(items as! [Friend])
-			}
 			self.retryCount = 0
-			
-			var filteredItems = items as [Any]
-			if let transfers = items as? [Transfer] {
-				if fromSentTransfersScreen {
-					filteredItems = transfers.filter(\.isSender)
-				} else {
-					filteredItems = transfers.filter { !$0.isSender }
-				}
-			}
-			
-            self.items = filteredItems.map { item in
-                return ItemViewModel(item, longDateStyle: longDateStyle, selection: { [weak self] in
-                    if let friend = item as? Friend {
-                        self?.select(friend: friend)
-                    } else if let card = item as? Card {
-                        self?.select(card: card)
-                    } else if let transfer = item as? Transfer {
-                        self?.select(transfer: transfer)
-                    } else {
-                        fatalError("unknown item: \(item)")
-                    }
-                })
-            }
-            
+            self.items = items
 			self.refreshControl?.endRefreshing()
 			self.tableView.reloadData()
 			
