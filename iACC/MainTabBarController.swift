@@ -56,36 +56,47 @@ class MainTabBarController: UITabBarController {
 	
 	private func makeFriendsList() -> ListViewController {
 		let vc = ListViewController()
-		vc.fromFriendsScreen = true
-        vc.shouldRetry = true
-        vc.maxRetryCount = 2
         vc.title = "Friends"
         vc.navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: vc, action: #selector(addFriend))
+        let cache = FriendsCacheItemsServiceAdapter(cache: friendsCache) { [weak vc] friend in
+            vc?.select(friend: friend)
+        }
         let isPremium = User.shared?.isPremium == true
-        vc.service = FriendsAPIItemsServiceAdapter(
+        let api = FriendsAPIItemsServiceAdapter(
             api: FriendsAPI.shared,
             cache: isPremium ? friendsCache : NullFriendsCache()) { [weak vc] friend in
                     vc?.select(friend: friend)
-            }
+            }.retry(2)
+        vc.service = isPremium ? api.fallback(cache) : api
 		return vc
 	}
 	
 	private func makeSentTransfersList() -> ListViewController {
 		let vc = ListViewController()
-		vc.fromSentTransfersScreen = true
+        vc.navigationItem.title = "Sent"
+        vc.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Send", style: .done, target: vc, action: #selector(sendMoney))
+        vc.service = SentTransferAPIItemsServiceAdapter(
+            api: TransfersAPI.shared,
+            select: { [weak vc] transfer in
+                vc?.select(transfer: transfer)
+            }).retry(1)
 		return vc
 	}
 	
 	private func makeReceivedTransfersList() -> ListViewController {
 		let vc = ListViewController()
-		vc.fromReceivedTransfersScreen = true
+        vc.navigationItem.title = "Received"
+        vc.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Request", style: .done, target: vc, action: #selector(requestMoney))
+        vc.service = ReceivedTransferAPIItemsServiceAdapter(
+            api: TransfersAPI.shared,
+            select: { [weak vc] transfer in
+                vc?.select(transfer: transfer)
+            }).retry(1)
 		return vc
 	}
 	
 	private func makeCardsList() -> ListViewController {
 		let vc = ListViewController()
-		vc.fromCardsScreen = true
-        vc.shouldRetry = false
         vc.title = "Cards"
         vc.navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: vc, action: #selector(addCard))
         vc.service = CardsAPIItemsServiceAdapter(
@@ -95,7 +106,36 @@ class MainTabBarController: UITabBarController {
         })
 		return vc
 	}
-	
+}
+
+struct ItemsServiceWithFallback: ItemsService {
+    let primary: ItemsService
+    let fallback: ItemsService
+    
+    func loadItems(completion: @escaping (Result<[ItemViewModel], Error>) -> Void) {
+        primary.loadItems { result in
+            switch result {
+            case .success:
+                completion(result)
+            case .failure:
+                fallback.loadItems(completion: completion)
+            }
+        }
+    }
+}
+
+extension ItemsService {
+    func fallback(_ fallback: ItemsService) -> ItemsService {
+        ItemsServiceWithFallback(primary: self, fallback: fallback)
+    }
+    
+    func retry(_ retryCount: UInt) -> ItemsService {
+        var service: ItemsService = self
+        for _ in 0..<retryCount {
+            service = service.fallback(self)
+        }
+        return service
+    }
 }
 
 struct FriendsAPIItemsServiceAdapter: ItemsService {
@@ -110,6 +150,25 @@ struct FriendsAPIItemsServiceAdapter: ItemsService {
                     cache.save(friends)
                     
                     return friends.map { friend in
+                        ItemViewModel(friend: friend) {
+                            select(friend)
+                        }
+                    }
+                })
+            }
+        }
+    }
+}
+
+struct FriendsCacheItemsServiceAdapter: ItemsService {
+    let cache: FriendsCache
+    let select: (Friend) -> Void
+    
+    func loadItems(completion: @escaping (Result<[ItemViewModel], Error>) -> Void) {
+        cache.loadFriends { result in
+            DispatchQueue.mainAsyncIfNeeded {
+                completion(result.map { friends in
+                    friends.map { friend in
                         ItemViewModel(friend: friend) {
                             select(friend)
                         }
@@ -144,5 +203,51 @@ struct CardsAPIItemsServiceAdapter: ItemsService {
             }
         }
     }
-    
 }
+
+struct SentTransferAPIItemsServiceAdapter: ItemsService {
+    let api: TransfersAPI
+    let select: (Transfer) -> Void
+    
+    func loadItems(completion: @escaping (Result<[ItemViewModel], Error>) -> Void) {
+        api.loadTransfers { result in
+            DispatchQueue.mainAsyncIfNeeded {
+                completion(result.map { transfers in
+                    return transfers
+                        .filter { $0.isSender }
+                        .map { item in
+                            ItemViewModel(
+                                transfer: item,
+                                longDateStyle: true) {
+                                    select(item)
+                                }
+                        }
+                })
+            }
+        }
+    }
+}
+
+struct ReceivedTransferAPIItemsServiceAdapter: ItemsService {
+    let api: TransfersAPI
+    let select: (Transfer) -> Void
+    
+    func loadItems(completion: @escaping (Result<[ItemViewModel], Error>) -> Void) {
+        api.loadTransfers { result in
+            DispatchQueue.mainAsyncIfNeeded {
+                completion(result.map { transfers in
+                    return transfers
+                        .filter { !$0.isSender}
+                        .map { item in
+                            ItemViewModel(
+                                transfer: item,
+                                longDateStyle: false) {
+                                    select(item)
+                                }
+                        }
+                })
+            }
+        }
+    }
+}
+
